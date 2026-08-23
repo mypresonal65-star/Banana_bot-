@@ -65,7 +65,7 @@ async def drm_handler(bot: Client, m: Message):
         x = await m.download()
         await bot.send_document(OWNER, x)
         await m.delete(True)
-        file_name, ext = os.path.splitext(os.path.basename(x))  # Extract filename & extension
+        file_name, ext = os.path.splitext(os.path.basename(x))
         path = f"./downloads/{m.chat.id}"
         with open(x, "r") as f:
             content = f.read()
@@ -131,7 +131,7 @@ async def drm_handler(bot: Client, m: Message):
     
         if int(raw_text) > len(links) :
             await editable.edit(f"🔹**Enter number in range of Index (01-{len(links)})**")
-            processing_request = False  # Reset the processing flag
+            processing_request = False
             await m.reply_text("🔹**Processing Cancled......  **")
             return
 
@@ -205,7 +205,7 @@ async def drm_handler(bot: Client, m: Message):
         thumb = "thumb.jpg"
     else:
         thumb = thumb
-#........................................................................................................................................................................................
+
     try:
         if m.document and raw_text == "1":
             batch_message = await bot.send_message(chat_id=channel_id, text=f"<blockquote><b>🎯Target Batch : {b_name}</b></blockquote>")
@@ -221,9 +221,8 @@ async def drm_handler(bot: Client, m: Message):
     except Exception as e:
         await m.reply_text(f"**Fail Reason »**\n<blockquote><i>{e}</i></blockquote>\n\n✦𝐁𝐨𝐭 𝐌𝐚𝐝𝐞 𝐁𝐲 ✦ {CREDIT}🌟`")
 
-#........................................................................................................................................................................................
     failed_count = 0
-    count =int(raw_text)    
+    count = int(raw_text)    
     arg = int(raw_text)
     try:
         for i in range(arg-1, len(links)):
@@ -236,8 +235,7 @@ async def drm_handler(bot: Client, m: Message):
             Vxy = links[i][1].replace("file/d/","uc?export=download&id=").replace("www.youtube-nocookie.com/embed", "youtu.be").replace("?modestbranding=1", "").replace("/view?usp=sharing","")
             url = "https://" + Vxy
             link0 = "https://" + Vxy
-#........................................................................................................................................................................................
-             
+
             name1 = links[i][0].replace("(", "[").replace(")", "]").replace("_", "").replace("\t", "").replace(":", "").replace("/", "").replace("+", "").replace("#", "").replace("|", "").replace("@", "").replace("*", "").replace(".", "").replace("https", "").replace("http", "").strip()
             if m.text:
                 if "youtu" in url:
@@ -276,9 +274,7 @@ async def drm_handler(bot: Client, m: Message):
                     else:
                         name = f'{str(count).zfill(3)}) {name1[:60]} {endfilename}'
                         namef = f'{name1[:60]} {endfilename}'
-                        
-#........................................................................................................................................................................................
-            # Initialize variables
+
             keys_string = ""
             appxkey = ""
             
@@ -290,36 +286,54 @@ async def drm_handler(bot: Client, m: Message):
 
             if "acecwply" in url:
                 cmd = f'yt-dlp -o "{name}.%(ext)s" -f "bestvideo[height<={raw_text2}]+bestaudio" --hls-prefer-ffmpeg --no-keep-video --remux-video mkv --no-warning "{url}"'
-         
-            elif 'classplusapp' in url or "testbook.com" in url or "classplusapp.com/drm" in url or "media-cdn.classplusapp.com/drm" in url:
-                # Extract contentId from URL
+
+            # ============================================================
+            #  🔥 FIXED: ClassPlus / Akamai Logic (L1 + L2)
+            # ============================================================
+            elif 'classplusapp' in url or "testbook.com" in url or "classplusapp.com/drm" in url or "media-cdn.classplusapp.com/drm" in url or "akamai-cdn.classplusapp.com" in url:
                 base_url = url
                 
-                # Check for different parameter patterns (both with and without 'l')
-                if '&contentHashId=' in url:
-                    base_url, contentId = url.split('&contentHashId=')
-                elif 'contentHashId=' in url:
-                    parts = url.split('contentHashId=')
-                    base_url = parts[0]
-                    contentId = parts[1].split('&')[0] if '&' in parts[1] else parts[1]
-                elif '&contentHashIdl=' in url:
-                    base_url, contentId = url.split('&contentHashIdl=')
-                elif 'contentHashIdl=' in url:
-                    parts = url.split('contentHashIdl=')
-                    base_url = parts[0]
-                    contentId = parts[1].split('&')[0] if '&' in parts[1] else parts[1]
+                # ---------- EXTRACT contentHashId / contentHashIdl ----------
+                content_id = None
+                hash_patterns = [
+                    r'contentHashId=([^&]+)',
+                    r'contentHashIdl=([^&]+)',
+                    r'[?&]contentHashId=([^&]+)',
+                    r'[?&]contentHashIdl=([^&]+)',
+                ]
+                for pattern in hash_patterns:
+                    match = re.search(pattern, url)
+                    if match:
+                        content_id = match.group(1).split('&')[0]
+                        break
+                
+                # Also try to get vidKey from URL path
+                vidkey = None
+                vid_patterns = [
+                    r'/lc/([^/]+)/',
+                    r'vidKey=([^&]+)',
+                ]
+                for pattern in vid_patterns:
+                    match = re.search(pattern, url)
+                    if match:
+                        vidkey = match.group(1)
+                        break
+                
+                print(f"🔑 content_id: {content_id}")
+                print(f"🔑 vidkey: {vidkey}")
+                
+                # ---------- CHECK IF IT'S L1 (has key + userIds) ----------
+                is_l1 = 'key=' in url and 'userIds=' in url
+                is_l2 = 'hdnts=' in url and not is_l1
+                
+                if is_l1:
+                    print("✅ L1 link detected (key + userIds) — preserving all parameters")
+                elif is_l2:
+                    print("✅ L2 link detected (hdnts only)")
                 else:
-                    # Fallback - try to extract ID from URL pattern
-                    contentId = url.split('/')[-1].split('?')[0] if '/' in url else url
+                    print("⚠️ Unknown link format")
                 
-                # Clean up contentId - remove any trailing URL parameters or fragments
-                if '&' in contentId:
-                    contentId = contentId.split('&')[0]
-                if '?' in contentId:
-                    contentId = contentId.split('?')[0]
-                if '#' in contentId:
-                    contentId = contentId.split('#')[0]
-                
+                # ---------- BUILD HEADERS ----------
                 headers = {
                     'host': 'api.classplusapp.com',
                     'x-access-token': f'{cptoken}',    
@@ -337,35 +351,56 @@ async def drm_handler(bot: Client, m: Message):
                     'accept-encoding': 'gzip'
                 }
                 
-                params = {
-                    'contentId': contentId,
-                    'offlineDownload': "false"
-                }
-
-                try:
-                    res = requests.get("https://api.classplusapp.com/cams/uploader/video/jw-signed-url", params=params, headers=headers, timeout=15).json()
+                # ---------- USE content_id OR vidkey ----------
+                api_content_id = content_id or vidkey
+                
+                if not api_content_id:
+                    # If no content_id found, try to extract from URL
+                    match = re.search(r'/([a-zA-Z0-9]+-[0-9]+[a-z]?)/', url)
+                    if match:
+                        api_content_id = match.group(1)
+                
+                if api_content_id:
+                    params = {
+                        'contentId': api_content_id,
+                        'offlineDownload': "false"
+                    }
                     
-                    # Check if it's a DRM URL
-                    if ("testbook.com" in base_url or "classplusapp.com/drm" in base_url or 
-                        "media-cdn.classplusapp.com/drm" in base_url or '/drm/' in base_url):
-                        if 'drmUrls' in res and 'manifestUrl' in res['drmUrls']:
-                            mpd_url = res['drmUrls']['manifestUrl']
-                            mpd, keys = helper.get_mps_and_keys(mpd_url)
-                            url = mpd
-                            keys_string = " ".join([f"--key {key}" for key in keys])
+                    try:
+                        res = requests.get(
+                            "https://api.classplusapp.com/cams/uploader/video/jw-signed-url",
+                            params=params,
+                            headers=headers,
+                            timeout=15
+                        ).json()
+                        
+                        print(f"📦 ClassPlus API Response: {res}")
+                        
+                        # Check if it's a DRM URL
+                        if ("testbook.com" in base_url or "classplusapp.com/drm" in base_url or 
+                            "media-cdn.classplusapp.com/drm" in base_url or '/drm/' in base_url or
+                            "akamai-cdn.classplusapp.com" in base_url):
+                            if 'drmUrls' in res and 'manifestUrl' in res['drmUrls']:
+                                mpd_url = res['drmUrls']['manifestUrl']
+                                mpd, keys = helper.get_mps_and_keys(mpd_url)
+                                url = mpd
+                                keys_string = " ".join([f"--key {key}" for key in keys])
+                            else:
+                                url = res.get("url", base_url)
+                                keys_string = ""
                         else:
                             url = res.get("url", base_url)
                             keys_string = ""
-                    else:
-                        url = res.get("url", base_url)
+                            
+                        print(f"✅ ClassPlus API Success - contentId: {api_content_id[:30]}...")
+                        
+                    except Exception as e:
+                        print(f"⚠️ ClassPlus API Error: {e}")
+                        # Keep original URL if API fails — L1 and L2 both preserved
+                        url = base_url
                         keys_string = ""
-                        
-                    print(f"ClassPlus API Success - contentId: {contentId[:30]}...")
-                        
-                except Exception as e:
-                    print(f"ClassPlus API Error: {e}")
-                    print(f"URL: {base_url[:100]}, contentId: {contentId}")
-                    # Keep original URL if API fails
+                else:
+                    print(f"⚠️ No contentId or vidkey found, using original URL")
                     url = base_url
                     keys_string = ""
 
@@ -396,7 +431,7 @@ async def drm_handler(bot: Client, m: Message):
                 cmd = f'yt-dlp --cookies youtube_cookies.txt -f "{ytf}" "{url}" -o "{name}".mp4'
             else:
                 cmd = f'yt-dlp -f "{ytf}" "{url}" -o "{name}.mp4"'
-#........................................................................................................................................................................................
+
             try:
                 if m.text:
                     cc = f'[{name1} [{res}p].mkv]({link0})'
@@ -451,7 +486,7 @@ async def drm_handler(bot: Client, m: Message):
                             ccimg = f'<b>{str(count).zfill(3)}.</b> {name1} .jpg'
                             ccm = f'<b>{str(count).zfill(3)}.</b> {name1} .mp3'
                             cchtml = f'<b>{str(count).zfill(3)}.</b> {name1} .html'
-#........................................................................................................................................................................................
+
                 remaining_links = len(links) - count
                 progress = (count / len(links)) * 100
                 Show = f"<i><b>Video Downloading</b></i>\n<blockquote><b>{str(count).zfill(3)}) {name1}</b></blockquote>" 
@@ -470,7 +505,7 @@ async def drm_handler(bot: Client, m: Message):
                         f"━━━━━━━━━━━━━━━━━━━━━━━━━\n" \
                         f"🛑**Send** /stop **to stop process**\n┃\n" \
                         f"╰━✦𝐁𝐨𝐭 𝐌𝐚𝐝𝐞 𝐁𝐲 ✦ {CREDIT}"
-#........................................................................................................................................................................................           
+
                 if "drive" in url:
                     try:
                         ka = await helper.download(url, name)
@@ -484,10 +519,10 @@ async def drm_handler(bot: Client, m: Message):
   
                 elif "pdf" in url:
                     if "cwmediabkt99" in url:
-                        max_retries = 15  # Define the maximum number of retries
-                        retry_delay = 4  # Delay between retries in seconds
-                        success = False  # To track whether the download was successful
-                        failure_msgs = []  # To keep track of failure messages
+                        max_retries = 15
+                        retry_delay = 4
+                        success = False
+                        failure_msgs = []
                         
                         for attempt in range(max_retries):
                             try:
@@ -499,12 +534,12 @@ async def drm_handler(bot: Client, m: Message):
                                 if response.status_code == 200:
                                     with open(f'{namef}.pdf', 'wb') as file:
                                         file.write(response.content)
-                                    await asyncio.sleep(retry_delay)  # Optional, to prevent spamming
+                                    await asyncio.sleep(retry_delay)
                                     copy = await bot.send_document(chat_id=channel_id, document=f'{namef}.pdf', caption=cc1)
                                     count += 1
                                     os.remove(f'{namef}.pdf')
                                     success = True
-                                    break  # Exit the retry loop if successful
+                                    break
                                 else:
                                     failure_msg = await m.reply_text(f"Attempt {attempt + 1}/{max_retries} failed: {response.status_code} {response.reason}")
                                     failure_msgs.append(failure_msg)
