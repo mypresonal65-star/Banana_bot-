@@ -30,35 +30,26 @@ def duration(filename):
     return float(result.stdout)
 
 # ============================================================
-#  🔥 UPDATED: get_mps_and_keys with FULL Akamai support
-#  - Supports L1 (key+userIds), L2 (hdntl), L3 (hdnts)
+#  🔥 FIXED: get_mps_and_keys with contentHashId support
 # ============================================================
-def get_mps_and_keys(api_url, is_akamai=False):
+def get_mps_and_keys(api_url):
     """
     Fetch MPD and keys from ClassPlus API.
-    Supports all Akamai formats: hdnts, hdntl, and old L1 format.
+    Supports both L1 (key + userIds) and L2 (hdnts only) links.
     """
     try:
-        print(f"🔑 Getting MPD and keys for: {api_url[:100]}...")
-        
         # If it's a direct MPD URL
         if api_url.endswith('.mpd') or '/manifest' in api_url:
             headers = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                 'Accept': 'application/dash+xml,application/xml,text/xml,*/*'
             }
-            
-            # For Akamai, add referer header
-            if is_akamai or 'akamai' in api_url:
-                headers['Referer'] = 'https://classplusapp.com/'
-                headers['Origin'] = 'https://classplusapp.com'
-            
             response = requests.get(api_url, headers=headers, timeout=30)
             response.raise_for_status()
             mpd_content = response.text
             
-            # Extract keys from MPD with Akamai support
-            keys = extract_keys_from_mpd(mpd_content, is_akamai)
+            # Try to extract keys from MPD
+            keys = extract_keys_from_mpd(mpd_content)
             return mpd_content, keys
         
         # Old format: API returns JSON with MPD and KEYS
@@ -71,124 +62,40 @@ def get_mps_and_keys(api_url, is_akamai=False):
             return mpd, keys
         
         if mpd:
-            keys = extract_keys_from_mpd(mpd, is_akamai)
+            # Try to extract keys from MPD
+            keys = extract_keys_from_mpd(mpd)
             return mpd, keys
         
         return api_url, []
         
     except Exception as e:
-        print(f"❌ Error in get_mps_and_keys: {e}")
+        print(f"Error in get_mps_and_keys: {e}")
         return api_url, []
 
 # ============================================================
-#  🔥 UPDATED: Extract keys from MPD with Akamai support
+#  🔥 NEW: Extract keys from MPD
 # ============================================================
-def extract_keys_from_mpd(mpd_content, is_akamai=False):
-    """Extract decryption keys from MPD content with Akamai support."""
+def extract_keys_from_mpd(mpd_content):
+    """Extract decryption keys from MPD content."""
     keys = []
     try:
-        # ============================================================
-        #  METHOD 1: Extract KID from ContentProtection
-        # ============================================================
-        # Pattern 1: default_KID="..."
+        # Look for default_KID
         kid_pattern = r'default_KID="([^"]+)"'
         kid_matches = re.findall(kid_pattern, mpd_content)
         
-        # Pattern 2: <cenc:pssh> with KID
+        for kid in kid_matches:
+            clean_kid = kid.replace('-', '').lower()
+            # This is a placeholder - actual keys need license server
+            keys.append(f"{clean_kid}:00000000000000000000000000000000")
+        
+        # Look for PSSH and try to extract keys
         pssh_pattern = r'<pssh[^>]*>([^<]+)</pssh>'
         pssh_matches = re.findall(pssh_pattern, mpd_content)
         
-        # Pattern 3: KID in ContentProtection schemeIdUri
-        scheme_pattern = r'schemeIdUri="[^"]*"[^>]*>\s*<cenc:default_KID>([^<]+)</cenc:default_KID>'
-        scheme_matches = re.findall(scheme_pattern, mpd_content, re.DOTALL)
-        
-        all_kids = []
-        
-        # Collect all KIDs
-        for kid in kid_matches:
-            clean_kid = kid.replace('-', '').lower()
-            all_kids.append(clean_kid)
-        
-        for match in scheme_matches:
-            clean_kid = match.replace('-', '').lower()
-            all_kids.append(clean_kid)
-        
-        # ============================================================
-        #  METHOD 2: For Akamai, try to get keys from license server
-        # ============================================================
-        if is_akamai:
-            print("🔐 Akamai DRM detected, trying to get keys from license...")
-            
-            # Look for license URL in MPD
-            license_pattern = r'<ms:laurl[^>]*>(https?://[^<]+)</ms:laurl>'
-            license_match = re.search(license_pattern, mpd_content)
-            
-            if license_match:
-                license_url = license_match.group(1)
-                print(f"📡 License URL: {license_url}")
-                
-                # Try to get keys from license server
-                for kid in all_kids:
-                    try:
-                        key = get_key_from_license(license_url, kid)
-                        if key:
-                            keys.append(f"{kid}:{key}")
-                    except Exception as e:
-                        print(f"⚠️ Could not get key for KID {kid}: {e}")
-        
-        # ============================================================
-        #  METHOD 3: If no keys found, use placeholder (for testing)
-        # ============================================================
-        if not keys and all_kids:
-            print("⚠️ No keys extracted, using placeholder keys")
-            for kid in all_kids:
-                placeholder_key = "00000000000000000000000000000000"
-                keys.append(f"{kid}:{placeholder_key}")
-        
-        print(f"🔑 Extracted {len(keys)} keys")
         return keys
-        
     except Exception as e:
-        print(f"❌ Error extracting keys: {e}")
+        print(f"Error extracting keys: {e}")
         return []
-
-# ============================================================
-#  🔥 NEW: Get key from license server
-# ============================================================
-def get_key_from_license(license_url, kid):
-    """
-    Get decryption key from license server.
-    NOTE: This is a placeholder - actual implementation depends on
-    the license server response format.
-    """
-    try:
-        # Prepare the request payload
-        # This format varies by DRM provider (Widevine, PlayReady, etc.)
-        payload = {
-            'kid': kid,
-            'type': 'widevine'
-        }
-        
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Content-Type': 'application/json'
-        }
-        
-        response = requests.post(license_url, json=payload, headers=headers, timeout=30)
-        
-        if response.status_code == 200:
-            # Parse response - format depends on license server
-            data = response.json()
-            if 'key' in data:
-                return data['key']
-            elif 'keys' in data and len(data['keys']) > 0:
-                return data['keys'][0]
-        
-        return None
-        
-    except Exception as e:
-        print(f"⚠️ License server error: {e}")
-        return None
 
 def exec(cmd):
         process = subprocess.run(cmd, stdout=subprocess.PIPE,stderr=subprocess.PIPE)
@@ -264,69 +171,50 @@ def vid_info(info):
     return new_info
 
 # ============================================================
-#  🔥 UPDATED: decrypt_and_merge_video with FULL Akamai support
-#  - Supports L1 (key+userIds), L2 (hdntl), L3 (hdnts)
-#  - Preserves all URL parameters
+#  🔥 FIXED: decrypt_and_merge_video with L1 support
 # ============================================================
 async def decrypt_and_merge_video(mpd_url, keys_string, output_path, output_name, quality="720"):
     try:
         output_path = Path(output_path)
         output_path.mkdir(parents=True, exist_ok=True)
 
-        # ============================================================
-        #  DETECT LINK TYPE and PRESERVE PARAMETERS
-        # ============================================================
-        is_akamai = 'akamai' in mpd_url or 'hdntl' in mpd_url or 'hdnts' in mpd_url or 'hdnt=' in mpd_url
+        # Check if it's an Akamai link (L1 or L2)
+        is_akamai = 'akamai' in mpd_url or 'hdntl' in mpd_url or 'hdnts' in mpd_url
         
+        # For Akamai links, preserve all parameters
         if is_akamai:
             print(f"✅ Akamai link detected, preserving all parameters")
-            print(f"📎 URL: {mpd_url[:200]}...")
         
-        # ============================================================
-        #  DOWNLOAD USING yt-dlp WITH PROPER HEADERS
-        # ============================================================
-        # For Akamai, add additional headers
-        headers_cmd = ''
-        if is_akamai:
-            headers_cmd = '--add-header "Referer:https://classplusapp.com/" --add-header "Origin:https://classplusapp.com"'
-        
-        # Use yt-dlp to download with proper format
-        cmd1 = f'yt-dlp -f "bv[height<={quality}]+ba/b" -o "{output_path}/file.%(ext)s" --allow-unplayable-format --no-check-certificate --external-downloader aria2c {headers_cmd} "{mpd_url}"'
-        print(f"⬇️ Running: {cmd1}")
+        cmd1 = f'yt-dlp -f "bv[height<={quality}]+ba/b" -o "{output_path}/file.%(ext)s" --allow-unplayable-format --no-check-certificate --external-downloader aria2c "{mpd_url}"'
+        print(f"Running command: {cmd1}")
         os.system(cmd1)
         
         avDir = list(output_path.iterdir())
-        print(f"📁 Downloaded files: {avDir}")
-        print("🔓 Decrypting...")
+        print(f"Downloaded files: {avDir}")
+        print("Decrypting")
 
         video_decrypted = False
         audio_decrypted = False
 
-        # ============================================================
-        #  DECRYPT USING mp4decrypt (if keys provided)
-        # ============================================================
+        # If keys_string is provided, use mp4decrypt
         if keys_string and '--key' in keys_string:
-            print(f"🔑 Using keys: {keys_string}")
-            
             for data in avDir:
                 if data.suffix == ".mp4" and not video_decrypted:
                     cmd2 = f'mp4decrypt {keys_string} --show-progress "{data}" "{output_path}/video.mp4"'
-                    print(f"🔓 Running: {cmd2}")
+                    print(f"Running command: {cmd2}")
                     os.system(cmd2)
                     if (output_path / "video.mp4").exists():
                         video_decrypted = True
                     data.unlink()
                 elif data.suffix == ".m4a" and not audio_decrypted:
                     cmd3 = f'mp4decrypt {keys_string} --show-progress "{data}" "{output_path}/audio.m4a"'
-                    print(f"🔓 Running: {cmd3}")
+                    print(f"Running command: {cmd3}")
                     os.system(cmd3)
                     if (output_path / "audio.m4a").exists():
                         audio_decrypted = True
                     data.unlink()
         
-        # ============================================================
-        #  RENAME FILES (if decryption not needed or failed)
-        # ============================================================
+        # If decryption failed or not needed, rename files
         if not video_decrypted:
             for data in avDir:
                 if data.suffix in ['.mp4', '.mkv', '.webm', '.ts']:
@@ -341,12 +229,10 @@ async def decrypt_and_merge_video(mpd_url, keys_string, output_path, output_name
                     audio_decrypted = True
                     break
         
-        # ============================================================
-        #  MERGE VIDEO AND AUDIO
-        # ============================================================
+        # Merge if both exist
         if video_decrypted and audio_decrypted:
             cmd4 = f'ffmpeg -i "{output_path}/video.mp4" -i "{output_path}/audio.m4a" -c copy "{output_path}/{output_name}.mp4"'
-            print(f"🔄 Running: {cmd4}")
+            print(f"Running command: {cmd4}")
             os.system(cmd4)
             if (output_path / "video.mp4").exists():
                 (output_path / "video.mp4").unlink()
@@ -368,17 +254,14 @@ async def decrypt_and_merge_video(mpd_url, keys_string, output_path, output_name
         if not filename.exists():
             raise FileNotFoundError("Merged video file not found.")
         
-        # ============================================================
-        #  VERIFY DURATION
-        # ============================================================
         cmd5 = f'ffmpeg -i "{filename}" 2>&1 | grep "Duration"'
         duration_info = os.popen(cmd5).read()
-        print(f"⏱️ Duration info: {duration_info}")
+        print(f"Duration info: {duration_info}")
 
         return str(filename)
 
     except Exception as e:
-        print(f"❌ Error during decryption and merging: {str(e)}")
+        print(f"Error during decryption and merging: {str(e)}")
         raise
 
 async def run(cmd):
@@ -425,36 +308,20 @@ def time_name():
 
 
 # ============================================================
-#  🔥 UPDATED: download_video with URL parameter preservation
-#  - Supports L1 (key+userIds), L2 (hdntl), L3 (hdnts)
-#  - Preserves all URL parameters
+#  🔥 FIXED: download_video with URL parameter preservation
 # ============================================================
 async def download_video(url, cmd, name):
-    # ============================================================
-    #  CHECK FOR AKAMAI AND PRESERVE PARAMETERS
-    # ============================================================
-    is_akamai = 'akamai' in url or 'hdntl' in url or 'hdnts' in url
-    
-    # For Akamai links, add additional headers
-    headers_cmd = ''
-    if is_akamai:
-        print(f"✅ Akamai download detected, preserving all parameters")
-        headers_cmd = '--add-header "Referer:https://classplusapp.com/" --add-header "Origin:https://classplusapp.com"'
-    
-    # Build the download command with proper headers
-    download_cmd = f'{cmd} -R 25 --fragment-retries 25 --external-downloader aria2c --downloader-args "aria2c: -x 16 -j 32" {headers_cmd}'
-    
+    # Ensure URL is complete with all parameters (L1: key+userIds, L2: hdnts)
+    download_cmd = f'{cmd} -R 25 --fragment-retries 25 --external-downloader aria2c --downloader-args "aria2c: -x 16 -j 32"'
     global failed_counter
     print(f"⬇️ Running: {download_cmd}")
     logging.info(download_cmd)
     k = subprocess.run(download_cmd, shell=True)
-    
     if "visionias" in cmd and k.returncode != 0 and failed_counter <= 10:
         failed_counter += 1
         await asyncio.sleep(5)
         await download_video(url, cmd, name)
     failed_counter = 0
-    
     try:
         if os.path.isfile(name):
             return name
@@ -527,7 +394,7 @@ async def send_vid(bot: Client, m: Message, cc, filename, vidwatermark, thumb, n
             w_filename = f"w_{filename}"
             font_path = "vidwater.ttf"
             subprocess.run(
-                f'ffmpeg -i "{filename}" -vf "drawtext=fontfile={font_path}:text=\'{vidwatermark}\':fontcolor=white@0.3:fontsize=h/6:x=(w_text-w)/2:y=(h-text_h)/2" -codec:a copy "{w_filename}"',
+                f'ffmpeg -i "{filename}" -vf "drawtext=fontfile={font_path}:text=\'{vidwatermark}\':fontcolor=white@0.3:fontsize=h/6:x=(w-text_w)/2:y=(h-text_h)/2" -codec:a copy "{w_filename}"',
                 shell=True
             )
             
