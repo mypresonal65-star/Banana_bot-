@@ -288,9 +288,7 @@ async def drm_handler(bot: Client, m: Message):
                 cmd = f'yt-dlp -o "{name}.%(ext)s" -f "bestvideo[height<={raw_text2}]+bestaudio" --hls-prefer-ffmpeg --no-keep-video --remux-video mkv --no-warning "{url}"'
 
             # ============================================================
-            #  🔥 UPDATED: ClassPlus / Akamai Logic (Supports ALL Akamai formats)
-            #  - Working link: master.m3u8?hdnts=...
-            #  - New link: /720/hdntl=.../720p.m3u8
+            #  🔥 FIXED: ClassPlus / Akamai Logic (L1 + L2)
             # ============================================================
             elif 'classplusapp' in url or "testbook.com" in url or "classplusapp.com/drm" in url or "media-cdn.classplusapp.com/drm" in url or "akamai-cdn.classplusapp.com" in url:
                 base_url = url
@@ -309,13 +307,11 @@ async def drm_handler(bot: Client, m: Message):
                         content_id = match.group(1).split('&')[0]
                         break
                 
-                # ---------- EXTRACT video ID from path (for Akamai links) ----------
-                # Pattern: /lc/[VIDEO_ID]/ or /azure/media/956/lc/[VIDEO_ID]/
+                # Also try to get vidKey from URL path
                 vidkey = None
                 vid_patterns = [
                     r'/lc/([^/]+)/',
-                    r'/azure/media/\d+/lc/([^/]+)/',
-                    r'/[a-zA-Z0-9]+-[0-9]+[a-z]?/',
+                    r'vidKey=([^&]+)',
                 ]
                 for pattern in vid_patterns:
                     match = re.search(pattern, url)
@@ -323,31 +319,17 @@ async def drm_handler(bot: Client, m: Message):
                         vidkey = match.group(1)
                         break
                 
-                # Also try to get from URL path segments
-                if not vidkey:
-                    parts = url.split('/')
-                    for part in parts:
-                        if re.match(r'^[a-zA-Z0-9]+-[0-9]+[a-z]?$', part):
-                            vidkey = part
-                            break
-                
                 print(f"🔑 content_id: {content_id}")
                 print(f"🔑 vidkey: {vidkey}")
                 
-                # ---------- DETECT LINK TYPE ----------
-                # L1: has 'key=' and 'userIds='
-                # L2 (hdntl): has 'hdntl=' in path (new format)
-                # L3 (hdnts): has 'hdnts=' in query string (working format)
+                # ---------- CHECK IF IT'S L1 (has key + userIds) ----------
                 is_l1 = 'key=' in url and 'userIds=' in url
-                is_l2_hdntl = 'hdntl=' in url
-                is_l3_hdnts = 'hdnts=' in url
+                is_l2 = 'hdnts=' in url and not is_l1
                 
                 if is_l1:
                     print("✅ L1 link detected (key + userIds) — preserving all parameters")
-                elif is_l2_hdntl:
-                    print("✅ L2 link detected (hdntl in path) — new Akamai format")
-                elif is_l3_hdnts:
-                    print("✅ L3 link detected (hdnts in query) — working Akamai format")
+                elif is_l2:
+                    print("✅ L2 link detected (hdnts only)")
                 else:
                     print("⚠️ Unknown link format")
                 
@@ -372,8 +354,8 @@ async def drm_handler(bot: Client, m: Message):
                 # ---------- USE content_id OR vidkey ----------
                 api_content_id = content_id or vidkey
                 
-                # If still no content_id, try to extract from URL path
                 if not api_content_id:
+                    # If no content_id found, try to extract from URL
                     match = re.search(r'/([a-zA-Z0-9]+-[0-9]+[a-z]?)/', url)
                     if match:
                         api_content_id = match.group(1)
@@ -400,9 +382,7 @@ async def drm_handler(bot: Client, m: Message):
                             "akamai-cdn.classplusapp.com" in base_url):
                             if 'drmUrls' in res and 'manifestUrl' in res['drmUrls']:
                                 mpd_url = res['drmUrls']['manifestUrl']
-                                # Pass is_akamai flag for Akamai links
-                                is_akamai = "akamai-cdn.classplusapp.com" in base_url
-                                mpd, keys = helper.get_mps_and_keys(mpd_url, is_akamai=is_akamai)
+                                mpd, keys = helper.get_mps_and_keys(mpd_url)
                                 url = mpd
                                 keys_string = " ".join([f"--key {key}" for key in keys])
                             else:
@@ -416,7 +396,7 @@ async def drm_handler(bot: Client, m: Message):
                         
                     except Exception as e:
                         print(f"⚠️ ClassPlus API Error: {e}")
-                        # Keep original URL if API fails — all formats preserved
+                        # Keep original URL if API fails — L1 and L2 both preserved
                         url = base_url
                         keys_string = ""
                 else:
@@ -536,7 +516,7 @@ async def drm_handler(bot: Client, m: Message):
                         await m.reply_text(str(e))
                         time.sleep(e.x)
                         continue    
-
+  
                 elif "pdf" in url:
                     if "cwmediabkt99" in url:
                         max_retries = 15
@@ -584,7 +564,7 @@ async def drm_handler(bot: Client, m: Message):
                             await m.reply_text(str(e))
                             time.sleep(e.x)
                             continue    
-
+           
                 elif any(ext in url for ext in [".jpg", ".jpeg", ".png"]):
                     try:
                         ext = url.split('.')[-1]
@@ -625,9 +605,8 @@ async def drm_handler(bot: Client, m: Message):
                     await asyncio.sleep(1)  
                     continue  
 
-                # ========== UPDATED: DRM detection with Akamai support ==========
                 elif ('drmcdni' in url or 'drm/wv' in url or 'drm/common' in url or 
-                      (keys_string and ("classplusapp" in link0 or "akamai-cdn.classplusapp.com" in link0)) or '/drm/' in url):
+                      (keys_string and "classplusapp" in link0) or '/drm/' in url):
                     prog = await bot.send_message(channel_id, Show, disable_web_page_preview=True)
                     prog1 = await m.reply_text(Show1, disable_web_page_preview=True)
                     res_file = await helper.decrypt_and_merge_video(url, keys_string, path, name, raw_text2)
@@ -638,7 +617,7 @@ async def drm_handler(bot: Client, m: Message):
                     count += 1
                     await asyncio.sleep(1)
                     continue
-
+     
                 else:
                     prog = await bot.send_message(channel_id, Show, disable_web_page_preview=True)
                     prog1 = await m.reply_text(Show1, disable_web_page_preview=True)
